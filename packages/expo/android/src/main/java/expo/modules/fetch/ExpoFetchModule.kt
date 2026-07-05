@@ -4,6 +4,7 @@ package expo.modules.fetch
 
 import android.util.Log
 import com.facebook.react.bridge.ReactContext
+import com.facebook.react.modules.blob.BlobModule
 import com.facebook.react.modules.network.CookieJarContainer
 import com.facebook.react.modules.network.ForwardingCookieHandler
 import com.facebook.react.modules.network.OkHttpClientProvider
@@ -47,6 +48,13 @@ class ExpoFetchModule : Module() {
 
     OnCreate {
       cookieJarContainer.setCookieJar(JavaNetCookieJar(cookieHandler))
+    }
+
+    // Stores data in React Native's blob store, so JS can create a `Blob` referencing it.
+    AsyncFunction("storeBlobData") { data: ByteArray ->
+      val blobModule = reactContext.getNativeModule(BlobModule::class.java)
+        ?: throw FetchBlobModuleUnavailableException()
+      return@AsyncFunction blobModule.store(data)
     }
 
     OnDestroy {
