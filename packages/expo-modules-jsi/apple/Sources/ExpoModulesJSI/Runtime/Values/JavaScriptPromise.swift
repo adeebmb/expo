@@ -11,20 +11,37 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
   private typealias PromiseContinuation = CheckedContinuation<JavaScriptValue.Ref, any Error>
 
   private weak let runtime: JavaScriptRuntime?
-  private var object: JavaScriptObject
   private let deferredPromise = DeferredPromise()
 
-  // Create refs for resolve and reject functions.
-  // They will be set in the Promise setup function.
-  private let resolveFunction = JavaScriptValue.Ref()
-  private let rejectFunction = JavaScriptValue.Ref()
+  /// Owns the promise's JSI values (the object and, for a deferred promise, its resolve/reject
+  /// functions). Registered with the runtime's ``LongLivedObjectCollection`` so they're released on
+  /// the JS thread at teardown (``allowRelease()``) rather than against a freed runtime when a
+  /// wrapper outlives its runtime (e.g. an async function's promise held by a URLSession delegate).
+  @JavaScriptActor
+  private final class LongLivedState: LongLivedObject {
+    // Stored as `JavaScriptValue` (a reference type), not `JavaScriptObject`: a `Copyable` value read
+    // back through `JavaScriptRef.withValue` avoids the copy a borrowed `~Copyable` object would trap on.
+    let object = JavaScriptValue.Ref()
+    let resolveFunction = JavaScriptValue.Ref()
+    let rejectFunction = JavaScriptValue.Ref()
+
+    func allowRelease() {
+      object.release()
+      resolveFunction.release()
+      rejectFunction.release()
+    }
+  }
+
+  private let longLivedState = LongLivedState()
 
   /// Initializes a promise from the existing object. The promise may already be settled.
   /// It cannot be resolved/rejected from the outside, i.e. `resolve` and `reject` functions are no-op.
   @JavaScriptActor
   public init(_ runtime: JavaScriptRuntime, _ object: consuming JavaScriptObject) throws {
     self.runtime = runtime
-    self.object = object
+    longLivedState.object.reset(object.asValue())
+    // Register so the collection owns the promise's JSI values until teardown (see `LongLivedState`).
+    runtime.longLivedObjects.add(longLivedState)
     try setUpCallbacks()
   }
 
@@ -32,24 +49,22 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
   @JavaScriptActor
   public init(_ runtime: JavaScriptRuntime) throws {
     self.runtime = runtime
-    // Initialize the non-copyable field before any throwing work. Swift requires a
-    // consistently initialized value on every throwing initializer path.
-    self.object = runtime.createObject()
 
     // Create function that is the promise setup. It is called immediately on `callAsConstructor`.
-    let setup = runtime.createFunction { [weak resolveFunction, weak rejectFunction] this, arguments in
-      resolveFunction?.reset(arguments[0])
-      rejectFunction?.reset(arguments[1])
+    let setup = runtime.createFunction { [weak longLivedState] this, arguments in
+      longLivedState?.resolveFunction.reset(arguments[0])
+      longLivedState?.rejectFunction.reset(arguments[1])
       return .undefined
     }
 
-    self.object =
+    let object =
       try runtime
       .global()
       .getPropertyAsFunction(.cached(runtime, "Promise"))
       .callAsConstructor(setup.asValue())
-      .getObject()
-
+    longLivedState.object.reset(object)
+    // Register so the collection owns the promise's JSI values until teardown (see `LongLivedState`).
+    runtime.longLivedObjects.add(longLivedState)
     try setUpCallbacks()
   }
 
@@ -59,7 +74,7 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
   }
 
   public var isDeferred: Bool {
-    return !resolveFunction.isEmpty && !rejectFunction.isEmpty
+    return !longLivedState.resolveFunction.isEmpty && !longLivedState.rejectFunction.isEmpty
   }
 
   @JavaScriptActor
@@ -68,7 +83,10 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
   }
 
   public func asValue() -> JavaScriptValue {
-    return object.asValue()
+    // Read without consuming, so the state keeps owning the object (unlike `Ref.asValue()`).
+    return longLivedState.object.withValue { object in
+      return object
+    } ?? .undefined
   }
 
   public func resolve<V: JavaScriptRepresentable>(_ value: V) {
@@ -77,17 +95,18 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
     }
 
     // `resolve` is not isolated, so make sure to jump to JS thread.
-    runtime.schedule(priority: .immediate) { [resolveFunction, rejectFunction] in
+    runtime.schedule(priority: .immediate) { [longLivedState] in
       // If the promise is already settled, do nothing.
-      guard let resolver = resolveFunction.take() else {
+      guard let resolver = longLivedState.resolveFunction.take() else {
         return
       }
       // Call the actual resolver given in the Promise setup.
       // This will also call `deferredPromise.resolve` in the `then` handler.
       _ = try! resolver.getFunction().call(arguments: value)
 
-      // Release the rejecter, we cannot call it anymore.
-      rejectFunction.release()
+      // The rejecter can't be called anymore. The state stays registered so it keeps owning the
+      // object until teardown.
+      longLivedState.rejectFunction.release()
     }
   }
 
@@ -97,9 +116,9 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
     }
 
     // `reject` is not isolated, so make sure to jump to JS thread.
-    runtime.schedule(priority: .immediate) { [resolveFunction, rejectFunction] in
+    runtime.schedule(priority: .immediate) { [longLivedState] in
       // If the promise is already settled, do nothing.
-      guard let rejecter = rejectFunction.take() else {
+      guard let rejecter = longLivedState.rejectFunction.take() else {
         return
       }
       // Convert the error to its JavaScript representation. This preserves an existing
@@ -112,8 +131,9 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
       // This will also call `deferredPromise.reject` in the `then` handler.
       _ = try! rejecter.getFunction().call(arguments: errorValue)
 
-      // Release the resolver, we cannot call it anymore.
-      resolveFunction.release()
+      // The resolver can't be called anymore. The state stays registered so it keeps owning the
+      // object until teardown.
+      longLivedState.resolveFunction.release()
     }
   }
 
@@ -140,6 +160,12 @@ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
       }
       return .undefined
     }
-    try object.callFunction(.cached(runtime, "then"), arguments: onFulfilled.asValue(), onRejected.asValue())
+    _ = try longLivedState.object.withValue { object in
+      try object?.getObject().callFunction(
+        .cached(runtime, "then"),
+        arguments: onFulfilled.asValue(),
+        onRejected.asValue()
+      )
+    }
   }
 }

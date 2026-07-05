@@ -370,4 +370,79 @@ struct JavaScriptPromiseTests {
 
     #expect(promise.isDeferred == false)
   }
+
+  // MARK: - Long-lived object registration
+
+  @Test
+  func `deferred promise registers as a long-lived object`() throws {
+    let runtime = JavaScriptRuntime()
+    #expect(runtime.longLivedObjects.count == 0)
+
+    let promise = try JavaScriptPromise(runtime)
+    _ = promise.isDeferred
+
+    #expect(runtime.longLivedObjects.count == 1)
+  }
+
+  @Test
+  func `wrapping an existing promise registers to own its object`() throws {
+    let runtime = JavaScriptRuntime()
+    let promise = try runtime.eval("Promise.resolve(42)").getPromise()
+    #expect(promise.isDeferred == false)
+
+    // Even a wrapped promise owns a JSI object that must not be released against a freed runtime,
+    // so it registers to have that object swept at teardown.
+    #expect(runtime.longLivedObjects.count == 1)
+  }
+
+  @Test
+  func `settling keeps the promise registered to own its object`() async throws {
+    let runtime = JavaScriptRuntime()
+    let promise = try JavaScriptPromise(runtime)
+    #expect(runtime.longLivedObjects.count == 1)
+
+    promise.resolve(JavaScriptValue(runtime, 42))
+    _ = try await promise.await()
+
+    // Settling releases the resolve/reject functions but the state stays registered so it continues
+    // to own the promise object until the runtime tears down.
+    #expect(promise.isDeferred == false)
+    #expect(runtime.longLivedObjects.count == 1)
+  }
+
+  @Test
+  func `an unsettled deferred promise is released by the teardown sweep`() throws {
+    let runtime = JavaScriptRuntime()
+    let promise = try JavaScriptPromise(runtime)
+    #expect(runtime.longLivedObjects.count == 1)
+
+    // The promise is never settled; the runtime's teardown sweep must release its long-lived state.
+    runtime.longLivedObjects.clear()
+
+    #expect(runtime.longLivedObjects.count == 0)
+    // After the sweep the settle functions are released, so it can no longer be settled.
+    #expect(promise.isDeferred == false)
+  }
+
+  @Test
+  func `an unsettled deferred promise outliving its runtime does not crash on teardown`() throws {
+    // Reproduces the shape of the promise-teardown crash (#47454): a deferred promise is still in
+    // flight when its runtime is torn down. Before the state was owned by the runtime's
+    // `LongLivedObjectCollection`, its JSI values were released after the Hermes runtime was already
+    // destroyed, a use-after-free. Now the runtime's teardown sweep releases the state on the JS
+    // thread while the runtime is still valid.
+    var promise: JavaScriptPromise? = nil
+
+    do {
+      let runtime = JavaScriptRuntime()
+      promise = try JavaScriptPromise(runtime)
+      #expect(promise?.isDeferred == true)
+      // Leaving the scope releases the runtime while the promise is still unsettled. Its teardown
+      // sweep must release the promise's state before Hermes is destroyed.
+    }
+
+    // Dropping the promise wrapper here must not touch a freed runtime. This is the crash point in
+    // #47454; reaching the end of the test without a crash is the assertion.
+    promise = nil
+  }
 }
