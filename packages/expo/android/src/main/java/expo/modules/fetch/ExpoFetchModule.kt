@@ -50,7 +50,8 @@ class ExpoFetchModule : Module() {
       cookieJarContainer.setCookieJar(JavaNetCookieJar(cookieHandler))
     }
 
-    AsyncFunction("storeBlobData") { data: ByteArray ->
+    // TODO(kudo,20260706): remove this when we install expo-blob as globalThis.Blob
+    AsyncFunction("unstable_createBlobData") { data: ByteArray ->
       val blobModule = reactContext.getNativeModule(BlobModule::class.java)
         ?: throw FetchBlobModuleUnavailableException()
       return@AsyncFunction blobModule.store(data)

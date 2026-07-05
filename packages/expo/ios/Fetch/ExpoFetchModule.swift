@@ -24,7 +24,8 @@ public final class ExpoFetchModule: Module {
       urlSession.invalidateAndCancel()
     }
 
-    AsyncFunction("storeBlobData") { (data: Data) -> String in
+    // TODO(kudo,20260706): remove this when we install expo-blob as globalThis.Blob
+    AsyncFunction("unstable_createBlobData") { (data: Data) -> String in
       guard let blobManager: NSObject = self.appContext?.nativeModule(named: "BlobModule") else {
         throw FetchBlobModuleUnavailableException()
       }

@@ -24,7 +24,7 @@ jest.mock('../ExpoFetchModule', () => {
   return {
     ExpoFetchModule: {
       NativeResponse: StubNativeResponse,
-      storeBlobData: jest.fn(async () => 'mock-blob-id'),
+      unstable_createBlobData: jest.fn(async () => 'mock-blob-id'),
     },
   };
 });
@@ -36,7 +36,7 @@ describe('FetchResponse blob() with react-native Blob', () => {
 
   beforeEach(() => {
     globalThis.Blob = RNBlob;
-    ExpoFetchModule.storeBlobData.mockClear();
+    ExpoFetchModule.unstable_createBlobData.mockClear();
   });
 
   afterEach(() => {
@@ -75,8 +75,8 @@ describe('FetchResponse blob() with react-native Blob', () => {
     const response = makeResponse();
     await response.blob();
 
-    expect(ExpoFetchModule.storeBlobData).toHaveBeenCalledTimes(1);
-    const bytes = ExpoFetchModule.storeBlobData.mock.calls[0][0] as Uint8Array;
+    expect(ExpoFetchModule.unstable_createBlobData).toHaveBeenCalledTimes(1);
+    const bytes = ExpoFetchModule.unstable_createBlobData.mock.calls[0][0] as Uint8Array;
     expect(new TextDecoder().decode(bytes)).toBe('hello world');
   });
 

@@ -89,7 +89,7 @@ jest.mock('../ExpoFetchModule', () => {
     ExpoFetchModule: {
       NativeRequest: StubNativeRequest,
       NativeResponse: StubNativeResponse,
-      storeBlobData: jest.fn(async () => 'mock-blob-id'),
+      unstable_createBlobData: jest.fn(async () => 'mock-blob-id'),
     },
   };
 });
