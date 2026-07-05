@@ -9,10 +9,8 @@ export function isReactNativeBlobGlobal(): boolean {
 }
 
 /**
- * react-native's `Blob` cannot hold binary data created in JS: its constructor
- * only accepts string and `Blob` parts, and strings are stored natively as
- * UTF-8 text. Instead, store the bytes in react-native's native blob store
- * and create the `Blob` from the store reference, like XHR responses do.
+ * react-native's `Blob` cannot be created from binary data in JS, so store the
+ * bytes in its native blob store and reference them, like XHR responses do.
  */
 export async function createReactNativeBlobAsync(buffer: ArrayBuffer, type: string): Promise<Blob> {
   const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;

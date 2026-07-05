@@ -24,9 +24,7 @@ public final class ExpoFetchModule: Module {
       urlSession.invalidateAndCancel()
     }
 
-    // Stores data in React Native's blob store, so JS can create a `Blob` referencing it.
-    // RCTBlobManager lives in the React-RCTBlob pod that Expo doesn't depend on at build time,
-    // so it is resolved by name and invoked through the ObjC runtime.
+    // RCTBlobManager is resolved by name and invoked dynamically to avoid a React-RCTBlob build dependency.
     AsyncFunction("storeBlobData") { (data: Data) -> String in
       guard let blobManager: NSObject = self.appContext?.nativeModule(named: "BlobModule") else {
         throw FetchBlobModuleUnavailableException()

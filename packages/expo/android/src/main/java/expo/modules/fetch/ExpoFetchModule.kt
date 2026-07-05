@@ -50,7 +50,6 @@ class ExpoFetchModule : Module() {
       cookieJarContainer.setCookieJar(JavaNetCookieJar(cookieHandler))
     }
 
-    // Stores data in React Native's blob store, so JS can create a `Blob` referencing it.
     AsyncFunction("storeBlobData") { data: ByteArray ->
       val blobModule = reactContext.getNativeModule(BlobModule::class.java)
         ?: throw FetchBlobModuleUnavailableException()
