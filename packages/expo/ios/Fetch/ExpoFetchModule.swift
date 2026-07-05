@@ -24,7 +24,6 @@ public final class ExpoFetchModule: Module {
       urlSession.invalidateAndCancel()
     }
 
-    // RCTBlobManager is resolved by name and invoked dynamically to avoid a React-RCTBlob build dependency.
     AsyncFunction("storeBlobData") { (data: Data) -> String in
       guard let blobManager: NSObject = self.appContext?.nativeModule(named: "BlobModule") else {
         throw FetchBlobModuleUnavailableException()
