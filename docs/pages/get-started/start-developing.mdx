@@ -16,7 +16,22 @@ import { Step } from '~/ui/components/Step';
 To start the development server, run the following command:
 
 <Terminal
-  cmd={{
+  cmd={{cd app
+npm install
+npm install -g eas-cli
+eas logincd app
+npm install
+npm install -g eas-cli
+eas login
+eas build:configure
+eas build --profile development --platform android
+eas build:configure
+eas build --profile development --platform androidcd app
+npm install
+npm install -g eas-cli
+eas login
+eas build:configure
+eas build --profile development --platform android
     npm: ['$ npx expo start'],
     yarn: ['$ yarn expo start'],
     pnpm: ['$ pnpm expo start'],
